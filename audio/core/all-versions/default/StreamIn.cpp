@@ -29,6 +29,7 @@
 #include <util/CoreUtils.h>
 #include <utils/Trace.h>
 #include <cmath>
+#include <dlfcn.h>
 #include <memory>
 
 namespace android {
@@ -572,8 +573,21 @@ Return<void> StreamIn::getActiveMicrophones(getActiveMicrophones_cb _hidl_cb) {
 #endif
 
 #if MAJOR_VERSION >= 5
+
+// Validate a legacy HAL function pointer by checking it resolves into a loaded
+// shared library.  Old vendor HALs (e.g. MT8163 audio.primary) allocate
+// audio_stream_in with a struct size smaller than the current audio.h definition.
+// Fields beyond their allocation contain heap garbage that is non-NULL but
+// points into malloc memory, causing SIGSEGV when called.  dladdr() returns 0
+// for any address not inside a loaded SO, catching this case.
+static bool isFnPtrValid(const void* fn) {
+    if (fn == nullptr) return false;
+    ::Dl_info info;
+    return ::dladdr(fn, &info) != 0;
+}
+
 Return<Result> StreamIn::setMicrophoneDirection(MicrophoneDirection direction) {
-    if (mStream->set_microphone_direction == nullptr) {
+    if (!isFnPtrValid(reinterpret_cast<const void*>(mStream->set_microphone_direction))) {
         return Result::NOT_SUPPORTED;
     }
     if (!common::utils::isValidHidlEnum(direction)) {
@@ -587,7 +601,7 @@ Return<Result> StreamIn::setMicrophoneDirection(MicrophoneDirection direction) {
 }
 
 Return<Result> StreamIn::setMicrophoneFieldDimension(float zoom) {
-    if (mStream->set_microphone_field_dimension == nullptr) {
+    if (!isFnPtrValid(reinterpret_cast<const void*>(mStream->set_microphone_field_dimension))) {
         return Result::NOT_SUPPORTED;
     }
     if (std::isnan(zoom) || zoom < -1 || zoom > 1) {
