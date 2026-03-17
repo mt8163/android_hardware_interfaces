@@ -586,30 +586,51 @@ static bool isFnPtrValid(const void* fn) {
     return ::dladdr(fn, &info) != 0;
 }
 
-Return<Result> StreamIn::setMicrophoneDirection(MicrophoneDirection direction) {
-    if (!isFnPtrValid(reinterpret_cast<const void*>(mStream->set_microphone_direction))) {
+// Some legacy MTK input HALs reject default v5 microphone control requests
+// with vendor-private status codes. Treat default requests as no-ops, and
+// downgrade obvious legacy failures for explicit requests to NOT_SUPPORTED.
+static Result analyzeLegacyMicControlStatus(const char* funcName, int status, bool isDefaultValue) {
+    if (status == 0) return Result::OK;
+    if (isDefaultValue) {
+        ALOGW("%s: ignoring legacy HAL status %d for default microphone control", funcName,
+              status);
+        return Result::OK;
+    }
+    if (status > 0 || status == -ENOSYS || status == -EINVAL || status == -EPERM) {
+        ALOGW("%s: treating legacy HAL status %d as not supported", funcName, status);
         return Result::NOT_SUPPORTED;
     }
+    return Stream::analyzeStatus(funcName, status);
+}
+
+Return<Result> StreamIn::setMicrophoneDirection(MicrophoneDirection direction) {
     if (!common::utils::isValidHidlEnum(direction)) {
         ALOGE("%s: Invalid direction %d", __func__, direction);
         return Result::INVALID_ARGUMENTS;
     }
-    return Stream::analyzeStatus(
+    const bool isDefaultDirection = direction == MicrophoneDirection::UNSPECIFIED;
+    if (!isFnPtrValid(reinterpret_cast<const void*>(mStream->set_microphone_direction))) {
+        return isDefaultDirection ? Result::OK : Result::NOT_SUPPORTED;
+    }
+    return analyzeLegacyMicControlStatus(
             "set_microphone_direction",
             mStream->set_microphone_direction(
-                    mStream, static_cast<audio_microphone_direction_t>(direction)));
+                    mStream, static_cast<audio_microphone_direction_t>(direction)),
+            isDefaultDirection);
 }
 
 Return<Result> StreamIn::setMicrophoneFieldDimension(float zoom) {
-    if (!isFnPtrValid(reinterpret_cast<const void*>(mStream->set_microphone_field_dimension))) {
-        return Result::NOT_SUPPORTED;
-    }
     if (std::isnan(zoom) || zoom < -1 || zoom > 1) {
         ALOGE("%s: Invalid zoom %f", __func__, zoom);
         return Result::INVALID_ARGUMENTS;
     }
-    return Stream::analyzeStatus("set_microphone_field_dimension",
-                                 mStream->set_microphone_field_dimension(mStream, zoom));
+    const bool isDefaultZoom = zoom == 0.0f;
+    if (!isFnPtrValid(reinterpret_cast<const void*>(mStream->set_microphone_field_dimension))) {
+        return isDefaultZoom ? Result::OK : Result::NOT_SUPPORTED;
+    }
+    return analyzeLegacyMicControlStatus("set_microphone_field_dimension",
+                                         mStream->set_microphone_field_dimension(mStream, zoom),
+                                         isDefaultZoom);
 }
 
 #endif
