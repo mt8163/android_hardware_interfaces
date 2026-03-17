@@ -381,9 +381,18 @@ std::tuple<Result, AudioPatchHandle> Device::createOrUpdateAudioPatch(
             status != NO_ERROR) {
             return {analyzeStatus("audioPortConfigsToHal;sinks", status), patch};
         }
-        retval = analyzeStatus("create_audio_patch",
-                               mDevice->create_audio_patch(mDevice, sources.size(), &halSources[0],
-                                                           sinks.size(), &halSinks[0], &halPatch));
+        const int status = mDevice->create_audio_patch(mDevice, sources.size(), &halSources[0],
+                                                       sinks.size(), &halSinks[0], &halPatch);
+        retval = analyzeStatus("create_audio_patch", status);
+        const bool isLegacyCapturePatch = sources.size() == 1 && sinks.size() == 1 &&
+                halSources[0].type == AUDIO_PORT_TYPE_DEVICE &&
+                halSinks[0].type == AUDIO_PORT_TYPE_MIX;
+        if (retval != Result::OK && isLegacyCapturePatch &&
+                (status > 0 || status == -ENOSYS || status == -EINVAL || status == -EPERM)) {
+            ALOGW("create_audio_patch: ignoring legacy HAL status %d for capture patch", status);
+            retval = Result::OK;
+            halPatch = AUDIO_PATCH_HANDLE_NONE;
+        }
         if (retval == Result::OK) {
             patch = static_cast<AudioPatchHandle>(halPatch);
         }
@@ -392,6 +401,9 @@ std::tuple<Result, AudioPatchHandle> Device::createOrUpdateAudioPatch(
 }
 
 Return<Result> Device::releaseAudioPatch(int32_t patch) {
+    if (patch == AUDIO_PATCH_HANDLE_NONE) {
+        return Result::OK;
+    }
     if (version() >= AUDIO_DEVICE_API_VERSION_3_0) {
         return analyzeStatus(
             "release_audio_patch",
