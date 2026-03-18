@@ -18,6 +18,7 @@
 
 #include "core/default/StreamOut.h"
 #include "core/default/Util.h"
+#include <android-base/properties.h>
 
 //#define LOG_NDEBUG 0
 #define ATRACE_TAG ATRACE_TAG_AUDIO
@@ -41,6 +42,7 @@ namespace implementation {
 
 using ::android::hardware::audio::common::COMMON_TYPES_CPP_VERSION::implementation::HidlUtils;
 using ::android::hardware::audio::CORE_TYPES_CPP_VERSION::implementation::CoreUtils;
+using ::android::base::GetProperty;
 namespace util {
 using namespace ::android::hardware::audio::CORE_TYPES_CPP_VERSION::implementation::util;
 }
@@ -729,14 +731,17 @@ Return<Result> StreamOut::setPlaybackRateParameters(const PlaybackRate& playback
 }
 
 Return<Result> StreamOut::setEventCallback(const sp<IStreamOutEventCallback>& callback) {
-    if (mStream->set_event_callback == nullptr) return Result::NOT_SUPPORTED;
-    int result = mStream->set_event_callback(mStream, StreamOut::asyncEventCallback, this);
-    if (result == 0) {
-        mEventCallback = callback;
+    if (GetProperty("ro.vendor.mtk.audio_supports_seteventcallback", "") == "false") {
+        return Result::NOT_SUPPORTED;
+    } else {
+        if (mStream->set_event_callback == nullptr) return Result::NOT_SUPPORTED;
+        int result = mStream->set_event_callback(mStream, StreamOut::asyncEventCallback, this);
+        if (result == 0) {
+            mEventCallback = callback;
+        }
+        return Stream::analyzeStatus("set_stream_out_callback", result, {ENOSYS} /*ignore*/);
     }
-    return Stream::analyzeStatus("set_stream_out_callback", result, {ENOSYS} /*ignore*/);
 }
-
 // static
 int StreamOut::asyncEventCallback(stream_event_callback_type_t event, void* param, void* cookie) {
     StreamOut* self = reinterpret_cast<StreamOut*>(cookie);
