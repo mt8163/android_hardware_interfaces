@@ -30,6 +30,7 @@
 #include <memory.h>
 #include <string.h>
 #include <algorithm>
+#include <cutils/properties.h>
 
 #include <android/log.h>
 
@@ -265,6 +266,13 @@ Return<void> Device::openInputStream(int32_t ioHandle, const DeviceAddress& devi
 #endif /* MAJOR_VERSION */
 
 Return<bool> Device::supportsAudioPatches() {
+#if MAJOR_VERSION >= 4
+    char value[PROPERTY_VALUE_MAX];
+    if ((property_get("ro.board.platform", value, "") > 0 && strcmp(value, "mt8163") == 0) ||
+        (property_get("ro.vendor.mediatek.platform", value, "") > 0 && strcmp(value, "MT8163") == 0)) {
+        return false;
+    }
+#endif
     return version() >= AUDIO_DEVICE_API_VERSION_3_0;
 }
 
@@ -281,6 +289,9 @@ Return<void> Device::createAudioPatch(const hidl_vec<AudioPortConfig>& sources,
 std::tuple<Result, AudioPatchHandle> Device::createOrUpdateAudioPatch(
         AudioPatchHandle patch, const hidl_vec<AudioPortConfig>& sources,
         const hidl_vec<AudioPortConfig>& sinks) {
+    if (!supportsAudioPatches()) {
+        return {Result::NOT_SUPPORTED, patch};
+    }
     Result retval(Result::NOT_SUPPORTED);
     if (version() >= AUDIO_DEVICE_API_VERSION_3_0) {
         std::unique_ptr<audio_port_config[]> halSources(HidlUtils::audioPortConfigsToHal(sources));
@@ -297,6 +308,9 @@ std::tuple<Result, AudioPatchHandle> Device::createOrUpdateAudioPatch(
 }
 
 Return<Result> Device::releaseAudioPatch(int32_t patch) {
+    if (!supportsAudioPatches()) {
+        return Result::NOT_SUPPORTED;
+    }
     if (version() >= AUDIO_DEVICE_API_VERSION_3_0) {
         return analyzeStatus(
             "release_audio_patch",
